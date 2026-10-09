@@ -202,7 +202,7 @@ import {
   threadJumpCommandForIndex,
   threadJumpIndexFromCommand,
 } from "../../keybindings";
-import { useNavigate, useSearch } from "@tanstack/react-router";
+import { useSearch } from "@tanstack/react-router";
 
 const DEFAULT_TAILSCALE_SERVE_PORT = 443;
 const EMPTY_ADVERTISED_ENDPOINTS: ReadonlyArray<AdvertisedEndpoint> = [];
@@ -2880,9 +2880,10 @@ export function ConnectionsSettings() {
   }, []);
 
   // A t3code://connect deep link pre-fills the add-environment dialog; the
-  // user still confirms the connection. The params are consumed once.
+  // user still confirms the connection. Changing the route search while the
+  // dialog is open remounts the settings content and closes it, so the params
+  // are only stripped from the URL once the dialog closes.
   const connectSearch = useSearch({ from: "/settings/connections" });
-  const navigateFromConnections = useNavigate({ from: "/settings/connections" });
   const deepLinkPairingUrl = connectSearch.connectPairing;
   const deepLinkSshHost = connectSearch.connectSsh;
   useEffect(() => {
@@ -2898,14 +2899,7 @@ export function ConnectionsSettings() {
       setSavedBackendError(null);
       setAddBackendDialogOpen(true);
     }
-    void navigateFromConnections({ search: {}, replace: true });
-  }, [
-    addBackendDialogOpen,
-    deepLinkPairingUrl,
-    deepLinkSshHost,
-    handleSavedBackendHostChange,
-    navigateFromConnections,
-  ]);
+  }, [addBackendDialogOpen, deepLinkPairingUrl, deepLinkSshHost, handleSavedBackendHostChange]);
 
   const renderConnectionModeCard = (input: {
     readonly mode: "remote" | "ssh";
@@ -4107,6 +4101,20 @@ export function ConnectionsSettings() {
                   setRouteTarget(null);
                 } else {
                   setSavedBackendError(null);
+                  const url = new URL(window.location.href);
+                  const stripConnectParams = (target: URL) => {
+                    target.searchParams.delete("connectPairing");
+                    target.searchParams.delete("connectSsh");
+                    return target;
+                  };
+                  const route = url.hash.startsWith("#/") ? url.hash.slice(1) : null;
+                  if (route !== null) {
+                    const routeUrl = stripConnectParams(new URL(route, window.location.origin));
+                    url.hash = `#${routeUrl.pathname}${routeUrl.search}`;
+                  } else {
+                    stripConnectParams(url);
+                  }
+                  window.history.replaceState({}, document.title, url.toString());
                 }
               }}
             >
