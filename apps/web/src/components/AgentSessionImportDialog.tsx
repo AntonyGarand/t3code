@@ -38,12 +38,16 @@ export function AgentSessionImportDialog(props: Scope) {
           className="flex h-[min(80vh,800px)] w-[min(1100px,calc(100vw-2rem))] max-w-none flex-col overflow-hidden"
           bottomStickOnMobile={false}
         >
-          <DialogHeader className="shrink-0 border-b">
+          <DialogHeader className="shrink-0">
             <DialogTitle>Import an existing session</DialogTitle>
             <DialogDescription>{props.machineName} · Claude Code</DialogDescription>
             <p className="break-all font-mono text-xs text-muted-foreground">{props.cwd}</p>
           </DialogHeader>
-          {open ? <SessionBrowser {...props} onClose={() => setOpen(false)} /> : null}
+          {open ? (
+            <div className="min-h-0 flex-1 border-t">
+              <SessionBrowser {...props} onClose={() => setOpen(false)} />
+            </div>
+          ) : null}
         </DialogPopup>
       </Dialog>
     </>

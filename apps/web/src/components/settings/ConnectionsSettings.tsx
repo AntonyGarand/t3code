@@ -202,6 +202,7 @@ import {
   threadJumpCommandForIndex,
   threadJumpIndexFromCommand,
 } from "../../keybindings";
+import { useNavigate, useSearch } from "@tanstack/react-router";
 
 const DEFAULT_TAILSCALE_SERVE_PORT = 443;
 const EMPTY_ADVERTISED_ENDPOINTS: ReadonlyArray<AdvertisedEndpoint> = [];
@@ -2877,6 +2878,34 @@ export function ConnectionsSettings() {
     }
     setSavedBackendHost(value);
   }, []);
+
+  // A t3code://connect deep link pre-fills the add-environment dialog; the
+  // user still confirms the connection. The params are consumed once.
+  const connectSearch = useSearch({ from: "/settings/connections" });
+  const navigateFromConnections = useNavigate({ from: "/settings/connections" });
+  const deepLinkPairingUrl = connectSearch.connectPairing;
+  const deepLinkSshHost = connectSearch.connectSsh;
+  useEffect(() => {
+    if (!deepLinkPairingUrl && !deepLinkSshHost) return;
+    if (!addBackendDialogOpen) {
+      if (deepLinkPairingUrl) {
+        setSavedBackendMode("remote");
+        handleSavedBackendHostChange(deepLinkPairingUrl);
+      } else {
+        setSavedBackendMode("ssh");
+        setSavedBackendSshHost(deepLinkSshHost ?? "");
+      }
+      setSavedBackendError(null);
+      setAddBackendDialogOpen(true);
+    }
+    void navigateFromConnections({ search: {}, replace: true });
+  }, [
+    addBackendDialogOpen,
+    deepLinkPairingUrl,
+    deepLinkSshHost,
+    handleSavedBackendHostChange,
+    navigateFromConnections,
+  ]);
 
   const renderConnectionModeCard = (input: {
     readonly mode: "remote" | "ssh";

@@ -4,6 +4,7 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 
@@ -16,6 +17,7 @@ import { clerkFrontendApiHostnameFromPublishableKey } from "@t3tools/shared/rela
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
+import * as DesktopConnectDeepLink from "./DesktopConnectDeepLink.ts";
 import * as DesktopUserData from "./DesktopUserData.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 
@@ -138,6 +140,40 @@ export const make = Effect.gen(function* () {
         return yield* Effect.interrupt;
       }
 
+      const startConnectHandoff = (value: string | undefined) => {
+        if (!value) return false;
+        const link = DesktopConnectDeepLink.readConnectDeepLink(value, environment.isDevelopment);
+        if (link === null) return false;
+        void runPromise(
+          Effect.gen(function* () {
+            yield* electronApp.whenReady;
+            // A cold-start link can arrive before the first window exists.
+            // Wait briefly for bootstrap to create it instead of dropping it.
+            const mainWindow = yield* electronWindow.currentMainOrFirst.pipe(
+              Effect.flatMap(
+                Option.match({
+                  onSome: (window) => Effect.succeed(window),
+                  onNone: () => Effect.fail("no-window" as const),
+                }),
+              ),
+              Effect.retry({ schedule: Schedule.spaced("250 millis"), times: 120 }),
+              Effect.option,
+            );
+            if (Option.isNone(mainWindow)) return;
+            yield* Effect.promise(() =>
+              mainWindow.value.loadURL(
+                DesktopConnectDeepLink.connectDeepLinkTarget(link, environment.isDevelopment),
+              ),
+            );
+            yield* electronWindow.reveal(mainWindow.value);
+          }).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("Could not open a connect deep link", cause),
+            ),
+          ),
+        );
+        return true;
+      };
       const startProviderAuthHandoff = (value: string | undefined) => {
         if (!value) return false;
         const request = readCodexAuthHandoff(value, environment.isDevelopment);
@@ -183,12 +219,20 @@ export const make = Effect.gen(function* () {
         return true;
       };
       const args = yield* HostProcessArguments;
-      args.some((value) => startProviderAuthHandoff(value));
+      args.some((value) => startConnectHandoff(value) || startProviderAuthHandoff(value));
       yield* electronApp.on("open-url", (event: { preventDefault: () => void }, url: string) => {
-        if (startProviderAuthHandoff(url) || resumeProviderAuth(url)) event.preventDefault();
+        if (startConnectHandoff(url) || startProviderAuthHandoff(url) || resumeProviderAuth(url))
+          event.preventDefault();
       });
       yield* electronApp.on("second-instance", (_event: unknown, argv: readonly string[]) => {
-        if (argv?.some((value) => startProviderAuthHandoff(value) || resumeProviderAuth(value)))
+        if (
+          argv?.some(
+            (value) =>
+              startConnectHandoff(value) ||
+              startProviderAuthHandoff(value) ||
+              resumeProviderAuth(value),
+          )
+        )
           return;
         void runPromise(
           Effect.gen(function* () {

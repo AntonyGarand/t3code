@@ -303,6 +303,72 @@ it.effect(
   },
 );
 
+it.effect("connect deep links open the add-environment settings pre-filled", () => {
+  storageMock.mockReturnValue(storageAdapter);
+  createClerkBridgeMock.mockReturnValue({ cleanup: vi.fn(), isPrimaryInstance: true });
+  const listeners = new Map<string, (...args: unknown[]) => void>();
+  const reveals = [
+    Promise.withResolvers<void>(),
+    Promise.withResolvers<void>(),
+    Promise.withResolvers<void>(),
+  ];
+  let revealCount = 0;
+  const loadURL = vi.fn(async (_url: string) => undefined);
+  const window = { loadURL };
+  const electronApp = {
+    on: (name: string, listener: (...args: unknown[]) => void) =>
+      Effect.sync(() => {
+        listeners.set(name, listener);
+      }),
+    whenReady: Effect.void,
+  } as unknown as ElectronApp.ElectronApp["Service"];
+  const electronWindow = {
+    currentMainOrFirst: Effect.succeed(Option.some(window)),
+    reveal: () => Effect.sync(() => reveals[revealCount++]?.resolve()),
+  } as unknown as ElectronWindow.ElectronWindow["Service"];
+  return Effect.gen(function* () {
+    const clerk = yield* DesktopClerk.DesktopClerk;
+    yield* clerk.configure;
+    const event = { preventDefault: vi.fn() };
+    const pairingUrl = "https://3773-ikbmbrwgxyvdrag8z8tt6.e2b.app/pair#token=HBEZX87HCEE9";
+    listeners.get("open-url")!(
+      event,
+      `t3code-dev://connect?pairing=${encodeURIComponent(pairingUrl)}`,
+    );
+    assert.equal(event.preventDefault.mock.calls.length, 1);
+    yield* Effect.promise(() => reveals[0]!.promise);
+    const [target] = loadURL.mock.calls[0] ?? [];
+    assert.equal(typeof target, "string");
+    const targetUrl = new URL(target as string);
+    assert.equal(targetUrl.host, "app");
+    assert.equal(targetUrl.hash.startsWith("#/settings/connections?connectPairing="), true);
+    assert.deepEqual(loadURL.mock.calls.length, 1);
+
+    // A second-instance delivery while the app runs is not dropped (#5978).
+    loadURL.mockClear();
+    listeners.get("second-instance")!({}, ["t3", "t3code-dev://connect?ssh=box"]);
+    yield* Effect.promise(() => reveals[1]!.promise);
+    assert.deepEqual(loadURL.mock.calls.length, 1);
+    const [sshTarget] = loadURL.mock.calls[0] ?? [];
+    assert.equal(
+      new URL(sshTarget as string).hash.startsWith("#/settings/connections?connectSsh=box"),
+      true,
+    );
+
+    // Invalid connect links are left to the default handler, not claimed.
+    loadURL.mockClear();
+    listeners.get("open-url")!(event, "t3code-dev://connect?pairing=not-a-url");
+    assert.equal(event.preventDefault.mock.calls.length, 1);
+    yield* Effect.yieldNow;
+    assert.deepEqual(loadURL.mock.calls.length, 0);
+  }).pipe(
+    Effect.scoped,
+    Effect.provide(layerDesktopClerk()),
+    Effect.provideService(ElectronApp.ElectronApp, electronApp),
+    Effect.provideService(ElectronWindow.ElectronWindow, electronWindow),
+  );
+});
+
 it.effect.each(["startup", "open-url"] as const)(
   "receives hosted web sign-in through the desktop %s handler",
   (entry) =>
