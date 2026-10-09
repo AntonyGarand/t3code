@@ -114,7 +114,14 @@ const resolveDesktopSshCliRunner = (
       nodeEngineRange: serverPackageJson.engines.node,
     };
   }
-  return { archiveVersion: environment.appVersion };
+  // In dev without a remote source checkout, Electron reports its own binary
+  // version (for example 44.4.5) as the app version, and no such t3 release
+  // exists. Fall back to the server package version so the archive download
+  // resolves; expect a protocol mismatch until a matching release exists.
+  const archiveVersion = environment.isDevelopment
+    ? serverPackageJson.version
+    : environment.appVersion;
+  return { archiveVersion };
 };
 
 const layerDesktopSshEnvironment = Layer.unwrap(
